@@ -2,7 +2,7 @@
 
 set -e
 
-REPO="croftlabs/rino-ping"
+REPO="Embernix-Development/rino-ping"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/rino-ping"
 SERVICE_FILE="/etc/systemd/system/rino-ping.service"
@@ -37,13 +37,16 @@ read -rp "Port [$DEFAULT_PORT]: " PORT
 
 PORT="${PORT:-$DEFAULT_PORT}"
 
+echo
+echo "Finding latest Rino Ping Agent release..."
+
 LATEST_URL="$(
     curl -fsSL \
         "https://api.github.com/repos/$REPO/releases/latest" \
     |
     grep "browser_download_url" \
     |
-    grep "linux-$ARCH" \
+    grep "rino-ping-linux-$ARCH" \
     |
     cut -d '"' -f 4 \
     |
@@ -51,6 +54,7 @@ LATEST_URL="$(
 )"
 
 if [ -z "$LATEST_URL" ]; then
+    echo
     echo "Could not find a compatible release."
     exit 1
 fi
@@ -100,6 +104,7 @@ systemctl restart \
 echo
 echo "Rino Ping Agent installed successfully."
 echo
+echo "Service: rino-ping"
 echo "Port: $PORT"
 echo
 echo "Health endpoint:"
