@@ -7,7 +7,20 @@ INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/rino-ping"
 SERVICE_FILE="/etc/systemd/system/rino-ping.service"
 BINARY_NAME="rino-ping"
-DEFAULT_PORT="8443"
+PORT="8443"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --port)
+            PORT="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "Please run as root."
@@ -32,13 +45,11 @@ esac
 echo
 echo "Rino Ping Agent Installer"
 echo
-
-read -rp "Port [$DEFAULT_PORT]: " PORT
-
-PORT="${PORT:-$DEFAULT_PORT}"
-
+echo "Architecture: $ARCH"
+echo "Port: $PORT"
 echo
-echo "Finding latest Rino Ping Agent release..."
+
+echo "Finding latest release..."
 
 LATEST_URL="$(
     curl -fsSL \
@@ -54,12 +65,10 @@ LATEST_URL="$(
 )"
 
 if [ -z "$LATEST_URL" ]; then
-    echo
     echo "Could not find a compatible release."
     exit 1
 fi
 
-echo
 echo "Downloading Rino Ping Agent..."
 
 curl -fL \
@@ -104,8 +113,11 @@ systemctl restart \
 echo
 echo "Rino Ping Agent installed successfully."
 echo
-echo "Service: rino-ping"
-echo "Port: $PORT"
+echo "Service:"
+echo "rino-ping"
+echo
+echo "Port:"
+echo "$PORT"
 echo
 echo "Health endpoint:"
 echo "http://SERVER_IP:$PORT/health"
@@ -113,5 +125,5 @@ echo
 echo "WebSocket endpoint:"
 echo "ws://SERVER_IP:$PORT/ping"
 echo
-echo "For production, configure HTTPS/WSS through your reverse proxy."
+echo "Production sites should use WSS through a reverse proxy."
 echo
