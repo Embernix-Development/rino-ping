@@ -3,11 +3,17 @@
 set -e
 
 REPO="Embernix-Development/rino-ping"
+
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/rino-ping"
 SERVICE_FILE="/etc/systemd/system/rino-ping.service"
+NGINX_SITE="/etc/nginx/sites-available/rino-ping"
+NGINX_LINK="/etc/nginx/sites-enabled/rino-ping"
+
 BINARY_NAME="rino-ping"
+
 PORT="8443"
+DOMAIN=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -15,6 +21,12 @@ while [[ $# -gt 0 ]]; do
             PORT="$2"
             shift 2
             ;;
+
+        --domain)
+            DOMAIN="$2"
+            shift 2
+            ;;
+
         *)
             echo "Unknown option: $1"
             exit 1
@@ -33,9 +45,11 @@ case "$ARCH" in
     x86_64)
         ARCH="amd64"
         ;;
+
     aarch64|arm64)
         ARCH="arm64"
         ;;
+
     *)
         echo "Unsupported architecture: $ARCH"
         exit 1
@@ -43,11 +57,24 @@ case "$ARCH" in
 esac
 
 echo
-echo "Rino Ping Agent Installer"
+echo "Rino Ping Agent"
+echo "---------------"
 echo
 echo "Architecture: $ARCH"
 echo "Port: $PORT"
+
+if [ -n "$DOMAIN" ]; then
+    echo "Domain: $DOMAIN"
+fi
+
 echo
+
+if ! command -v curl >/dev/null 2>&1; then
+    echo "Installing curl..."
+
+    apt-get update
+    apt-get install -y curl
+fi
 
 echo "Finding latest release..."
 
@@ -65,7 +92,7 @@ LATEST_URL="$(
 )"
 
 if [ -z "$LATEST_URL" ]; then
-    echo "Could not find a compatible release."
+    echo "Could not find a compatible Rino Ping Agent release."
     exit 1
 fi
 
@@ -111,19 +138,122 @@ systemctl restart \
     rino-ping
 
 echo
-echo "Rino Ping Agent installed successfully."
+echo "Rino Ping Agent installed."
 echo
-echo "Service:"
-echo "rino-ping"
+
+if ! systemctl is-active --quiet rino-ping; then
+    echo "Rino Ping Agent failed to start."
+    echo
+    echo "Check logs with:"
+    echo "journalctl -u rino-ping -n 50"
+    exit 1
+fi
+
+if [ -z "$DOMAIN" ]; then
+    echo "Agent is running."
+    echo
+    echo "Health:"
+    echo "http://SERVER_IP:$PORT/health"
+    echo
+    echo "WebSocket:"
+    echo "ws://SERVER_IP:$PORT/ping"
+    echo
+    echo "For production HTTPS websites, install again with:"
+    echo
+    echo "curl -fsSL https://raw.githubusercontent.com/$REPO/main/install.sh | sudo bash -s -- --domain ping.example.com"
+    echo
+    exit 0
+fi
+
+echo "Setting up secure WSS endpoint..."
 echo
-echo "Port:"
-echo "$PORT"
+
+if ! command -v nginx >/dev/null 2>&1; then
+    echo "Installing Nginx..."
+
+    apt-get update
+    apt-get install -y nginx
+fi
+
+if ! command -v certbot >/dev/null 2>&1; then
+    echo "Installing Certbot..."
+
+    apt-get update
+
+    apt-get install -y \
+        certbot \
+        python3-certbot-nginx
+fi
+
+cat > "$NGINX_SITE" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+
+    server_name $DOMAIN;
+
+    location /ping {
+        proxy_pass http://127.0.0.1:$PORT;
+
+        proxy_http_version 1.1;
+
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+    }
+
+    location /health {
+        proxy_pass http://127.0.0.1:$PORT;
+
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+
+ln -sf \
+    "$NGINX_SITE" \
+    "$NGINX_LINK"
+
+nginx -t
+
+systemctl enable nginx
+systemctl restart nginx
+
 echo
-echo "Health endpoint:"
-echo "http://SERVER_IP:$PORT/health"
+echo "Requesting SSL certificate..."
 echo
-echo "WebSocket endpoint:"
-echo "ws://SERVER_IP:$PORT/ping"
+
+certbot \
+    --nginx \
+    -d "$DOMAIN" \
+    --non-interactive \
+    --agree-tos \
+    --register-unsafely-without-email \
+    --redirect
+
+nginx -t
+systemctl reload nginx
+
 echo
-echo "Production sites should use WSS through a reverse proxy."
+echo "Rino Ping Agent setup complete."
+echo
+echo "Health:"
+echo "https://$DOMAIN/health"
+echo
+echo "WebSocket:"
+echo "wss://$DOMAIN/ping"
+echo
+echo "Use this in Rino:"
+echo
+echo "wss://$DOMAIN/ping"
 echo
